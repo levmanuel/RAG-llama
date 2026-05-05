@@ -1,3 +1,4 @@
+import requests
 import streamlit as st
 from langchain_ollama import OllamaLLM
 from langchain_community.document_loaders import PyPDFLoader
@@ -10,7 +11,20 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 
 st.set_page_config(page_title="RAG PDF Chat", page_icon="📚")
-st.title("RAG Llama 3.1")
+st.title("RAG LLaMA via Ollama")
+
+
+def get_ollama_models():
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        models = [m["name"] for m in response.json().get("models", [])]
+        return models if models else ["llama3.1"]
+    except Exception:
+        return ["llama3.1"]
+
+
+models = get_ollama_models()
+selected_model = st.selectbox("Modèle Ollama", models)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -38,11 +52,10 @@ def process_pdfs(pdf_paths):
     return FAISS.from_documents(texts, embeddings)
 
 
-def build_rag_chain(db):
-    llm = OllamaLLM(model="llama3.1")
+def build_rag_chain(db, model):
+    llm = OllamaLLM(model=model)
     retriever = db.as_retriever()
 
-    # Reformule la question en tenant compte de l'historique
     contextualize_prompt = ChatPromptTemplate.from_messages([
         ("system", "En tenant compte de l'historique de la conversation et de la dernière question de l'utilisateur, "
                    "reformulez une question autonome compréhensible sans l'historique. "
@@ -52,7 +65,6 @@ def build_rag_chain(db):
     ])
     history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_prompt)
 
-    # Répond en s'appuyant sur les documents récupérés
     qa_prompt = ChatPromptTemplate.from_messages([
         ("system", "Vous êtes un assistant pour des tâches de questions-réponses. "
                    "Utilisez uniquement les éléments de contexte suivants pour répondre. "
@@ -72,7 +84,7 @@ if st.button("Charger les PDFs"):
     with st.spinner("Chargement et traitement des PDFs..."):
         pdf_list = [path.strip() for path in pdf_paths.split("\n") if path.strip()]
         st.session_state.db = process_pdfs(pdf_list)
-        st.session_state.chain = build_rag_chain(st.session_state.db)
+        st.session_state.chain = build_rag_chain(st.session_state.db, selected_model)
         st.session_state.messages = []
         st.session_state.history = []
         st.success("PDFs chargés et traités avec succès!")
